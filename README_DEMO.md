@@ -12,12 +12,13 @@
 
 > Tested with Python 3.10+; relies only on NumPy, Matplotlib, and the standard library.
 
-## 10-Minute Classroom Flow (live demo)
-1. **Baseline (default preset):** `python run_sim.py`
-2. **Change load:** `python run_sim.py --scheduler all --users 12 --rbs 25 --slots 60 --seed 42`
-3. **Stress view:** `python run_sim.py --preset stress`
+## 12-Minute Classroom Flow (live demo)
+1. **Baseline fairness vs throughput (RR vs PF):** `python run_sim.py --scheduler rr pf --preset classroom`
+2. **Max Throughput collapse:** `python run_sim.py --scheduler mt --scenario load --users 20 --rbs 12 --slots 25`
+3. **WRR edge boost:** `python run_sim.py --scheduler wrr --scenario hetero_channel --weights 2,2,3,3,3,1,1,1,1,1`
+4. **QoS delay rescue (EXP/PF):** `python run_sim.py --scheduler exp_pf --scenario qos --users 12 --slots 40 --pack`
 
-Each command creates a timestamped folder under `outputs/` containing heatmaps, per-user bar charts, cumulative plots, fairness comparison, metrics CSVs, and `summary.md` with talking points.
+Each command creates a timestamped folder under `outputs/` containing heatmaps (first runs only), per-user bar charts, cumulative plots, fairness/throughput trade-off figures, metrics CSVs, and a numbered `presentation_pack/` with speaker notes when `--pack` is used.
 
 ## Troubleshooting (Windows)
 - **Matplotlib backend warnings:** The runner forces a non-GUI backend; rerun the command after activation if you see backend errors.

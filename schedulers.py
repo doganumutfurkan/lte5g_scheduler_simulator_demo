@@ -122,6 +122,8 @@ def exp_pf_schedule(
     avg_rate = np.ones(num_users)
     queue = np.zeros(num_users)
     hol_delay = np.zeros(num_users)
+    dropped_packets = np.zeros(num_users)
+    arrivals_history = np.zeros(num_users)
     allocations = []
     throughput = []
     hol_history: List[np.ndarray] = []
@@ -133,6 +135,9 @@ def exp_pf_schedule(
         slot_thr = np.zeros_like(slot_alloc)
         current_rates = channel.rates[:, slot]
         arrivals = rng.poisson(arrival_rate, size=num_users)
+        arrivals_history += arrivals
+        overflow = np.maximum(queue + arrivals - queue_limit, 0)
+        dropped_packets += overflow
         queue = np.minimum(queue + arrivals, queue_limit)
         hol_delay += queue > 0
         hol_history.append(hol_delay.copy())
@@ -152,7 +157,13 @@ def exp_pf_schedule(
         allocations.append(slot_alloc)
         throughput.append(slot_thr)
 
-    metadata = {"hol_delay": hol_delay.copy(), "queue": queue.copy(), "avg_rate": avg_rate.copy()}
+    metadata = {
+        "hol_delay": hol_delay.copy(),
+        "queue": queue.copy(),
+        "avg_rate": avg_rate.copy(),
+        "dropped": dropped_packets,
+        "arrivals": arrivals_history,
+    }
     if hol_history:
         metadata["hol_history"] = np.stack(hol_history, axis=0)
     return AllocationResult(_flatten_allocation(allocations), _flatten_allocation(throughput), metadata=metadata)

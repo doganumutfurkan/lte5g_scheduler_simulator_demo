@@ -8,17 +8,17 @@
 3. Install dependencies:
    - `pip install -r requirements.txt`
 4. Run a preset demo:
-   - `python run_sim.py --preset classroom`
+   - `python run_sim.py --preset classroom --pack`
 
 > Tested with Python 3.10+; relies only on NumPy, Matplotlib, and the standard library.
 
 ## 12-Minute Classroom Flow (live demo)
-1. **Baseline fairness vs throughput (RR vs PF):** `python run_sim.py --scheduler rr pf --preset classroom`
-2. **Max Throughput collapse:** `python run_sim.py --scheduler mt --scenario load --users 20 --rbs 12 --slots 25`
-3. **WRR edge boost:** `python run_sim.py --scheduler wrr --scenario hetero_channel --weights 2,2,3,3,3,1,1,1,1,1`
-4. **QoS delay rescue (EXP/PF):** `python run_sim.py --scheduler exp_pf --scenario qos --users 12 --slots 40 --pack`
+1. **Load sweep (RR vs PF vs MT, with uncertainty):** `python run_sim.py --scenario load --scheduler rr pf mt --seeds 1-3 --pack`
+2. **Heterogeneous channels (all 5 schedulers):** `python run_sim.py --scenario hetero_channel --scheduler all --seeds 1,2,3 --near_mean 3.0 --mid_mean 1.5 --edge_mean 0.6 --pack`
+3. **QoS delay stress (EXP/PF focus):** `python run_sim.py --scenario qos --scheduler rr pf exp_pf --seeds 1-3 --pack`
+4. **Fast classroom preset:** `python run_sim.py --preset classroom_fast --pack`
 
-Each command creates a timestamped folder under `outputs/` containing heatmaps (first runs only), per-user bar charts, cumulative plots, fairness/throughput trade-off figures, metrics CSVs, and a numbered `presentation_pack/` with speaker notes when `--pack` is used.
+Each command creates a timestamped folder under `outputs/<timestamp>/`. Multi-seed runs store raw metrics under `runs/seed_<N>/`, aggregate plots/tables under `aggregate/`, and (when `--pack` is used) a numbered `presentation_pack/` with aggregated figures and notes.
 
 ## Troubleshooting (Windows)
 - **Matplotlib backend warnings:** The runner forces a non-GUI backend; rerun the command after activation if you see backend errors.

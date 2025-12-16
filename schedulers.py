@@ -12,6 +12,7 @@ class ChannelState:
     rates: np.ndarray  # shape (users, slots, rbs) achievable rate or quality
     user_groups: Optional[List[str]] = None
     traffic_classes: Optional[List[str]] = None
+    channel_factors: Optional[np.ndarray] = None  # multiplicative efficiency per user
 
 
 @dataclass

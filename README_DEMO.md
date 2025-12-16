@@ -14,11 +14,14 @@
 
 ## 12-Minute Classroom Flow (live demo)
 1. **Load sweep (RR vs PF vs MT, with uncertainty):** `python run_sim.py --scenario load --scheduler rr pf mt --seeds 1-3 --pack`
-2. **Heterogeneous channels (all 5 schedulers):** `python run_sim.py --scenario hetero_channel --scheduler all --seeds 1,2,3 --near_mean 3.0 --mid_mean 1.5 --edge_mean 0.6 --pack`
+2. **Heterogeneous channels (all 5 schedulers, effective throughput fairness):** `python run_sim.py --scenario hetero_channel --scheduler all --seeds 1,2,3 --near_mean 3.0 --mid_mean 1.5 --edge_mean 0.6 --near_factor 1.0 --mid_factor 0.6 --edge_factor 0.25 --pack`
 3. **QoS delay stress (EXP/PF focus):** `python run_sim.py --scenario qos --scheduler rr pf exp_pf --seeds 1-3 --pack`
-4. **Fast classroom preset:** `python run_sim.py --preset classroom_fast --pack`
+4. **Fast classroom preset (multi-seed load + hetero, aggregated presentation pack):** `python run_sim.py --preset classroom --pack`
+5. **Quick single-seed classroom:** `python run_sim.py --preset classroom_fast --pack`
 
 Each command creates a timestamped folder under `outputs/<timestamp>/`. Multi-seed runs store raw metrics under `runs/seed_<N>/`, aggregate plots/tables under `aggregate/`, and (when `--pack` is used) a numbered `presentation_pack/` with aggregated figures and notes.
+
+- `aggregate/tradeoff_clean.png` shows 5 points (RR/PF/MT/WRR/EXP_PF) with mean ± std error bars using fairness over effective throughput.
 
 ## Troubleshooting (Windows)
 - **Matplotlib backend warnings:** The runner forces a non-GUI backend; rerun the command after activation if you see backend errors.

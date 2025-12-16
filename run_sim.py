@@ -47,6 +47,9 @@ class RunCase:
     near_mean: float = 3.0
     mid_mean: float = 1.5
     edge_mean: float = 0.6
+    near_factor: float = 1.0
+    mid_factor: float = 0.6
+    edge_factor: float = 0.25
 
 
 @dataclass
@@ -61,16 +64,25 @@ class ScenarioResult:
     scheduler: str
     allocation: np.ndarray
     throughput: np.ndarray
+    throughput_eff: np.ndarray
     fairness: float
+    fairness_rb: float
+    fairness_thr_eff: float
+    fairness_thr_raw: float
     utilization: float
     total_throughput: float
+    total_throughput_eff: float
     starvation: float
     per_user_total: np.ndarray
     per_user_share: np.ndarray
+    per_user_thr_raw: np.ndarray
+    per_user_thr_eff: np.ndarray
     group_info: Optional[List[str]] = None
     traffic_classes: Optional[List[str]] = None
     edge_share: Optional[float] = None
     edge_throughput: Optional[float] = None
+    edge_throughput_eff: Optional[float] = None
+    edge_throughput_eff_share: Optional[float] = None
     delay_avg: Optional[float] = None
     delay_p95: Optional[float] = None
     delay_p95_per_class: Optional[Dict[str, float]] = None
@@ -136,6 +148,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--near_mean", type=float, default=None, help="Mean channel quality for near users.")
     parser.add_argument("--mid_mean", type=float, default=None, help="Mean channel quality for mid users.")
     parser.add_argument("--edge_mean", type=float, default=None, help="Mean channel quality for edge users.")
+    parser.add_argument("--near_factor", type=float, default=None, help="Channel factor for near users (effective throughput).")
+    parser.add_argument("--mid_factor", type=float, default=None, help="Channel factor for mid users (effective throughput).")
+    parser.add_argument("--edge_factor", type=float, default=None, help="Channel factor for edge users (effective throughput).")
     parser.add_argument("--pack", action="store_true", help="Build presentation pack with key figures.")
     return parser.parse_args()
 
@@ -200,6 +215,9 @@ def build_cases(args: argparse.Namespace, seed: int) -> List[RunCase]:
     near_mean = args.near_mean if args.near_mean is not None else base.near_mean
     mid_mean = args.mid_mean if args.mid_mean is not None else base.mid_mean
     edge_mean = args.edge_mean if args.edge_mean is not None else base.edge_mean
+    near_factor = args.near_factor if args.near_factor is not None else base.near_factor
+    mid_factor = args.mid_factor if args.mid_factor is not None else base.mid_factor
+    edge_factor = args.edge_factor if args.edge_factor is not None else base.edge_factor
 
     cases: List[RunCase] = []
     if scenario_choice == "classroom":
@@ -224,6 +242,9 @@ def build_cases(args: argparse.Namespace, seed: int) -> List[RunCase]:
             near_mean=near_mean,
             mid_mean=mid_mean,
             edge_mean=edge_mean,
+            near_factor=near_factor,
+            mid_factor=mid_factor,
+            edge_factor=edge_factor,
         )
         cases.extend(build_scenario_cases(load_case, args.weights))
         cases.extend(build_scenario_cases(hetero_case, args.weights))
@@ -240,6 +261,9 @@ def build_cases(args: argparse.Namespace, seed: int) -> List[RunCase]:
         near_mean=near_mean,
         mid_mean=mid_mean,
         edge_mean=edge_mean,
+        near_factor=near_factor,
+        mid_factor=mid_factor,
+        edge_factor=edge_factor,
     )
     if scenario_choice == "load":
         base_case.rbs = max(10, rbs)
@@ -275,6 +299,12 @@ def build_scenario_cases(base_case: RunCase, weight_arg: Optional[str]) -> List[
                     seed=base_case.seed,
                     schedulers=base_case.schedulers,
                     label=f"load_{u}",
+                    near_mean=base_case.near_mean,
+                    mid_mean=base_case.mid_mean,
+                    edge_mean=base_case.edge_mean,
+                    near_factor=base_case.near_factor,
+                    mid_factor=base_case.mid_factor,
+                    edge_factor=base_case.edge_factor,
                 )
             )
     else:
@@ -289,18 +319,20 @@ def build_scenario_cases(base_case: RunCase, weight_arg: Optional[str]) -> List[
 def generate_channel(case: RunCase, rng: np.random.Generator) -> ChannelState:
     if case.scenario == "hetero_channel":
         groups: List[str] = []
+        factors: List[float] = []
         rates = np.zeros((case.users, case.slots, case.rbs))
         for u in range(case.users):
             frac = u / case.users
             if frac < 0.3:
-                mean, group = case.near_mean, "near"
+                mean, group, factor = case.near_mean, "near", case.near_factor
             elif frac < 0.7:
-                mean, group = case.mid_mean, "mid"
+                mean, group, factor = case.mid_mean, "mid", case.mid_factor
             else:
-                mean, group = case.edge_mean, "edge"
+                mean, group, factor = case.edge_mean, "edge", case.edge_factor
             groups.append(group)
+            factors.append(float(factor))
             rates[u] = rng.normal(loc=mean, scale=0.5, size=(case.slots, case.rbs)).clip(min=0.1)
-        return ChannelState(rates=rates, user_groups=groups)
+        return ChannelState(rates=rates, user_groups=groups, channel_factors=np.array(factors, dtype=float))
 
     if case.scenario == "bursty":
         base_rates = rng.lognormal(mean=1.0, sigma=0.8, size=(case.users, case.slots, case.rbs))
@@ -310,10 +342,10 @@ def generate_channel(case: RunCase, rng: np.random.Generator) -> ChannelState:
             activity[block_start : block_start + 10, :] = 0.05
             activity[block_start : block_start + 10, active_users] = 1.0
         rates = np.transpose(activity[:, :, None], (1, 0, 2)) * base_rates
-        return ChannelState(rates=rates)
+        return ChannelState(rates=rates, channel_factors=np.ones(case.users))
 
     rates = rng.lognormal(mean=1.2, sigma=0.5, size=(case.users, case.slots, case.rbs))
-    return ChannelState(rates=rates)
+    return ChannelState(rates=rates, channel_factors=np.ones(case.users))
 
 
 def assign_traffic_classes(case: RunCase) -> List[str]:
@@ -338,23 +370,55 @@ def compute_metrics(
 ) -> ScenarioResult:
     allocation = alloc.allocation
     throughput = alloc.per_slot_throughput
+    derived = channel.rates * allocation
+    served = np.where(throughput > 0, throughput, derived)
+    factors = channel.channel_factors if channel.channel_factors is not None else np.ones(allocation.shape[0])
+    eff_served = served * factors[:, None, None]
+
     flat_allocation = allocation.reshape(allocation.shape[0], -1)
     per_user_total = flat_allocation.sum(axis=1)
     total_allocated = per_user_total.sum()
     share_pct = (per_user_total / total_allocated * 100) if total_allocated > 0 else np.zeros_like(per_user_total)
-    fairness = float(np.square(per_user_total.sum()) / (len(per_user_total) * np.square(per_user_total).sum() + 1e-9)) if total_allocated > 0 else 0.0
+    fairness_rb = (
+        float(np.square(per_user_total.sum()) / (len(per_user_total) * np.square(per_user_total).sum() + 1e-9))
+        if total_allocated > 0
+        else 0.0
+    )
     utilization = float(total_allocated / (allocation.shape[1] * allocation.shape[2])) if allocation.size else 0.0
     starvation = float(np.mean(per_user_total == 0))
-    total_throughput = float(throughput.sum())
+
+    per_user_thr_raw = served.sum(axis=(1, 2))
+    per_user_thr_eff = eff_served.sum(axis=(1, 2))
+    total_throughput = float(per_user_thr_raw.sum())
+    total_throughput_eff = float(per_user_thr_eff.sum())
+    fairness_thr_eff = (
+        float(np.square(per_user_thr_eff.sum()) / (len(per_user_thr_eff) * np.square(per_user_thr_eff).sum() + 1e-9))
+        if total_throughput_eff > 0
+        else 0.0
+    )
+    fairness_thr_raw = (
+        float(np.square(per_user_thr_raw.sum()) / (len(per_user_thr_raw) * np.square(per_user_thr_raw).sum() + 1e-9))
+        if total_throughput > 0
+        else 0.0
+    )
+
+    if total_allocated > 0 and total_throughput <= 0:
+        raise RuntimeError(f"Zero throughput detected for {scheduler} despite allocations; check integration.")
 
     edge_share = None
     edge_throughput = None
+    edge_throughput_eff = None
+    edge_throughput_eff_share = None
     if channel.user_groups:
         groups = np.array(channel.user_groups)
         edge_mask = groups == "edge"
         if edge_mask.any():
             edge_share = float(per_user_total[edge_mask].sum() / total_allocated) if total_allocated > 0 else 0.0
-            edge_throughput = float(throughput[edge_mask].sum())
+            edge_throughput = float(per_user_thr_raw[edge_mask].sum())
+            edge_throughput_eff = float(per_user_thr_eff[edge_mask].sum())
+            edge_throughput_eff_share = (
+                float(per_user_thr_eff[edge_mask].sum() / total_throughput_eff) if total_throughput_eff > 0 else 0.0
+            )
 
     delay_avg = None
     delay_p95 = None
@@ -389,17 +453,26 @@ def compute_metrics(
         seed=case.seed,
         scheduler=scheduler,
         allocation=allocation,
-        throughput=throughput,
-        fairness=fairness,
+        throughput=served,
+        throughput_eff=eff_served,
+        fairness=fairness_thr_eff,
+        fairness_rb=fairness_rb,
+        fairness_thr_eff=fairness_thr_eff,
+        fairness_thr_raw=fairness_thr_raw,
         utilization=utilization,
         total_throughput=total_throughput,
+        total_throughput_eff=total_throughput_eff,
         starvation=starvation,
         per_user_total=per_user_total,
         per_user_share=share_pct,
+        per_user_thr_raw=per_user_thr_raw,
+        per_user_thr_eff=per_user_thr_eff,
         group_info=channel.user_groups,
         traffic_classes=traffic_classes,
         edge_share=edge_share,
         edge_throughput=edge_throughput,
+        edge_throughput_eff=edge_throughput_eff,
+        edge_throughput_eff_share=edge_throughput_eff_share,
         delay_avg=delay_avg,
         delay_p95=delay_p95,
         delay_p95_per_class=delay_per_class,
@@ -486,13 +559,65 @@ def save_tradeoff_plot(agg: List[Dict[str, float]], raw_results: List[ScenarioRe
         return
     plt.figure(figsize=(6, 4))
     for res in raw_results:
-        plt.scatter(res.fairness, res.total_throughput, color="#cccccc", alpha=0.3, s=15)
+        plt.scatter(res.fairness_thr_eff, res.total_throughput_eff, color="#cccccc", alpha=0.25, s=12)
     for row in agg:
-        plt.scatter(row["mean_fairness"], row["mean_throughput"], label=f"{row['scheduler'].upper()} ({row['users']}u)")
-    plt.xlabel("Fairness")
-    plt.ylabel("Throughput")
-    plt.title("Fairness/Throughput Trade-off (mean ± std)")
+        plt.errorbar(
+            row["mean_fairness_thr_eff"],
+            row["mean_throughput_eff"],
+            xerr=row.get("std_fairness_thr_eff", 0.0),
+            yerr=row.get("std_throughput_eff", 0.0),
+            fmt="o",
+            label=f"{row['scheduler'].upper()} ({row['users']}u)",
+        )
+    plt.xlabel("Jain Fairness (Effective Throughput)")
+    plt.ylabel("Effective Throughput")
+    plt.title("Fairness/Throughput Trade-off (dense)")
     plt.legend(fontsize=8)
+    plt.tight_layout()
+    plt.savefig(path)
+    plt.close()
+
+
+def save_tradeoff_clean(agg: List[Dict[str, float]], path: Path) -> None:
+    if not agg:
+        return
+    preferred = [row for row in agg if row.get("scenario") in {"hetero_channel", "load"}]
+    dataset = preferred if preferred else agg
+    user_levels = sorted({row["users"] for row in dataset}, reverse=True)
+    target_users = user_levels[0]
+    slice_rows = [row for row in dataset if row["users"] == target_users]
+    if not slice_rows:
+        slice_rows = dataset
+    # Keep one point per scheduler
+    unique_rows: Dict[str, Dict[str, float]] = {}
+    for row in slice_rows:
+        sched = row["scheduler"]
+        if sched not in unique_rows:
+            unique_rows[sched] = row
+    plt.figure(figsize=(6, 4))
+    for sched in ALL_SCHEDULERS:
+        row = unique_rows.get(sched)
+        if not row:
+            continue
+        plt.errorbar(
+            row.get("mean_fairness_thr_eff", 0.0),
+            row.get("mean_throughput_eff", 0.0),
+            xerr=row.get("std_fairness_thr_eff", 0.0),
+            yerr=row.get("std_throughput_eff", 0.0),
+            fmt="o",
+            markersize=7,
+            label=row["scheduler"].upper(),
+            capsize=3,
+        )
+        plt.text(
+            row.get("mean_fairness_thr_eff", 0.0) + 0.005,
+            row.get("mean_throughput_eff", 0.0),
+            row["scheduler"].upper(),
+            fontsize=8,
+        )
+    plt.xlabel("Jain Fairness (Effective Throughput)")
+    plt.ylabel("Effective Throughput (mean ± std)")
+    plt.title(f"Fairness vs Throughput @ {target_users} Users")
     plt.tight_layout()
     plt.savefig(path)
     plt.close()
@@ -507,8 +632,8 @@ def save_edge_plot(agg: List[Dict[str, float]], path: Path) -> None:
     errs = [row.get("std_edge_share", 0.0) for row in edge_data]
     plt.figure(figsize=(6, 4))
     plt.bar(labels, values, yerr=errs, color="#55A868", capsize=4)
-    plt.ylabel("Edge User Share")
-    plt.title("Edge User Share Comparison")
+    plt.ylabel("Edge Effective Throughput Share")
+    plt.title("Edge Effective Throughput Share")
     plt.tight_layout()
     plt.savefig(path)
     plt.close()
@@ -545,12 +670,17 @@ def write_metrics_runs(path: Path, results: List[ScenarioResult]) -> None:
         "rbs",
         "slots",
         "seed",
-        "fairness",
+        "fairness_thr_eff",
+        "fairness_thr_raw",
+        "fairness_rb",
         "utilization",
-        "throughput",
+        "throughput_raw",
+        "throughput_eff",
         "starvation",
-        "edge_share",
-        "edge_throughput",
+        "edge_share_rbs",
+        "edge_throughput_raw",
+        "edge_throughput_eff",
+        "edge_throughput_eff_share",
         "delay_avg",
         "delay_p95",
         "drop_rate",
@@ -567,12 +697,17 @@ def write_metrics_runs(path: Path, results: List[ScenarioResult]) -> None:
                 res.rbs,
                 res.slots,
                 res.seed,
-                round(res.fairness, 6),
+                round(res.fairness_thr_eff, 6),
+                round(res.fairness_thr_raw, 6),
+                round(res.fairness_rb, 6),
                 round(res.utilization, 6),
                 round(res.total_throughput, 6),
+                round(res.total_throughput_eff, 6),
                 round(res.starvation, 6),
                 res.edge_share if res.edge_share is not None else "",
                 res.edge_throughput if res.edge_throughput is not None else "",
+                res.edge_throughput_eff if res.edge_throughput_eff is not None else "",
+                res.edge_throughput_eff_share if res.edge_throughput_eff_share is not None else "",
                 res.delay_avg if res.delay_avg is not None else "",
                 res.delay_p95 if res.delay_p95 is not None else "",
                 res.drop_rate if res.drop_rate is not None else "",
@@ -584,11 +719,24 @@ def write_metrics_per_user(base: Path, results: List[ScenarioResult]) -> None:
         path = base / f"metrics_per_user_{res.run_id}_{res.scheduler}.csv"
         with path.open("w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["user_id", "total_rbs", "share_pct", "group", "traffic_class"])
+            writer.writerow(
+                ["user_id", "total_rbs", "share_pct", "thr_raw", "thr_eff", "group", "traffic_class"]
+            )
             groups = res.group_info or [""] * len(res.per_user_total)
             classes = res.traffic_classes or [""] * len(res.per_user_total)
-            for idx, (total, share, grp, cls) in enumerate(zip(res.per_user_total, res.per_user_share, groups, classes)):
-                writer.writerow([idx, int(total), round(float(share), 4), grp, cls])
+            for idx, (total, share, thr_raw, thr_eff, grp, cls) in enumerate(
+                zip(
+                    res.per_user_total,
+                    res.per_user_share,
+                    res.per_user_thr_raw,
+                    res.per_user_thr_eff,
+                    groups,
+                    classes,
+                )
+            ):
+                writer.writerow(
+                    [idx, int(total), round(float(share), 4), round(float(thr_raw), 6), round(float(thr_eff), 6), grp, cls]
+                )
 
 
 def aggregate_results(results: List[ScenarioResult]) -> List[Dict[str, float]]:
@@ -599,10 +747,12 @@ def aggregate_results(results: List[ScenarioResult]) -> List[Dict[str, float]]:
 
     agg_rows: List[Dict[str, float]] = []
     for key, rows in grouped.items():
-        fairness_vals = np.array([r.fairness for r in rows])
+        fairness_vals = np.array([r.fairness_thr_eff for r in rows])
+        fairness_rb_vals = np.array([r.fairness_rb for r in rows])
         thr_vals = np.array([r.total_throughput for r in rows])
+        thr_eff_vals = np.array([r.total_throughput_eff for r in rows])
         starv_vals = np.array([r.starvation for r in rows])
-        edge_vals = np.array([r.edge_share for r in rows if r.edge_share is not None])
+        edge_vals = np.array([r.edge_throughput_eff_share for r in rows if r.edge_throughput_eff_share is not None])
         row_dict: Dict[str, float] = {
             "scenario": key[0],
             "scheduler": key[1],
@@ -611,10 +761,14 @@ def aggregate_results(results: List[ScenarioResult]) -> List[Dict[str, float]]:
             "slots": key[4],
             "label": key[5],
             "count": len(rows),
-            "mean_fairness": float(np.mean(fairness_vals)),
-            "std_fairness": float(np.std(fairness_vals)),
+            "mean_fairness_thr_eff": float(np.mean(fairness_vals)),
+            "std_fairness_thr_eff": float(np.std(fairness_vals)),
+            "mean_fairness_rb": float(np.mean(fairness_rb_vals)),
+            "std_fairness_rb": float(np.std(fairness_rb_vals)),
             "mean_throughput": float(np.mean(thr_vals)),
             "std_throughput": float(np.std(thr_vals)),
+            "mean_throughput_eff": float(np.mean(thr_eff_vals)),
+            "std_throughput_eff": float(np.std(thr_eff_vals)),
             "mean_starvation": float(np.mean(starv_vals)),
             "std_starvation": float(np.std(starv_vals)),
             "mean_edge_share": float(np.mean(edge_vals)) if edge_vals.size else None,
@@ -640,8 +794,12 @@ def write_metrics_agg(path: Path, agg_rows: List[Dict[str, float]]) -> None:
         "count",
         "mean_throughput",
         "std_throughput",
-        "mean_fairness",
-        "std_fairness",
+        "mean_throughput_eff",
+        "std_throughput_eff",
+        "mean_fairness_thr_eff",
+        "std_fairness_thr_eff",
+        "mean_fairness_rb",
+        "std_fairness_rb",
         "mean_starvation",
         "std_starvation",
         "mean_edge_share",
@@ -664,15 +822,16 @@ def write_summary(outdir: Path, agg_rows: List[Dict[str, float]], seeds: List[in
     lines = ["# Simulation Summary", ""]
     lines.append(f"Seeds: {', '.join(str(s) for s in seeds)}")
     lines.append("")
-    lines.append("## Fairness (mean ± std)")
+    lines.append("## Fairness (effective throughput, mean ± std)")
     for row in agg_rows:
         lines.append(
             f"- {row['scenario']} / {row['scheduler'].upper()} / {row['users']}u: "
-            f"{row['mean_fairness']:.4f} ± {row['std_fairness']:.4f}"
+            f"{row.get('mean_fairness_thr_eff', 0):.4f} ± {row.get('std_fairness_thr_eff', 0):.4f}"
         )
     lines.append("")
     lines.append("## Takeaways")
-    lines.append("- MT boosts throughput but loses fairness; PF/EXP_PF stay steadier across loads.")
+    lines.append("- Fairness is measured on effective (channel-weighted) throughput.")
+    lines.append("- MT boosts throughput but sacrifices fairness for disadvantaged (edge) users; PF/EXP_PF stay steadier across loads.")
     lines.append("- WRR/EXP_PF aid disadvantaged users (edge or delay-sensitive).")
     lines.append("- Use --pack to collect aggregated figures (mean ± std).")
     (outdir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -682,13 +841,13 @@ def build_presentation_pack(source_dir: Path, outdir: Path, seeds: List[int]) ->
     pack_dir = outdir / "presentation_pack"
     pack_dir.mkdir(parents=True, exist_ok=True)
     figures = [
-        ("fairness_vs_users.png", "01_fairness_vs_users.png", "Fairness vs users (mean ± std across seeds)."),
-        ("throughput_vs_users.png", "02_throughput_vs_users.png", "Throughput vs users with uncertainty bands."),
-        ("tradeoff_fairness_throughput.png", "03_tradeoff.png", "Fairness/throughput trade-off, averaged across seeds."),
-        ("edge_share_comparison.png", "04_edge_share.png", "Edge-user share with error bars."),
+        ("fairness_vs_users.png", "01_fairness_vs_users.png", "Fairness (effective throughput) vs users, mean ± std."),
+        ("throughput_vs_users.png", "02_throughput_vs_users.png", "Effective throughput vs users with error bars."),
+        ("tradeoff_clean.png", "03_tradeoff.png", "Fairness/throughput trade-off (clean, 5 points, mean ± std)."),
+        ("edge_share_comparison.png", "04_edge_share.png", "Edge effective throughput share with error bars."),
         ("delay_p95.png", "05_qos_delay.png", "QoS P95 delay by class (mean ± std).")
     ]
-    notes = [f"Seeds aggregated: {len(seeds)} ({', '.join(map(str, seeds))})", ""]
+    notes = [f"Seeds aggregated: {len(seeds)} ({', '.join(map(str, seeds))})", "- Fairness computed on effective throughput (channel-weighted)."]
     for src, dest, line in figures:
         src_path = source_dir / src
         if src_path.exists():
@@ -772,15 +931,22 @@ def main() -> None:
     write_metrics_agg(aggregate_dir / "metrics_agg.csv", agg_rows)
 
     load_rows = [row for row in agg_rows if row["scenario"] == "load"]
-    save_fairness_plot(load_rows, aggregate_dir / "fairness_vs_users.png", "fairness", "Fairness vs Users", "Jain Fairness")
+    save_fairness_plot(
+        load_rows,
+        aggregate_dir / "fairness_vs_users.png",
+        "fairness_thr_eff",
+        "Fairness vs Users (Effective Throughput)",
+        "Jain Fairness (Effective Throughput)",
+    )
     save_fairness_plot(
         load_rows,
         aggregate_dir / "throughput_vs_users.png",
-        "throughput",
-        "Throughput vs Users",
-        "Throughput (a.u.)",
+        "throughput_eff",
+        "Effective Throughput vs Users",
+        "Effective Throughput (a.u.)",
     )
     save_tradeoff_plot(agg_rows, aggregated_results, aggregate_dir / "tradeoff_fairness_throughput.png")
+    save_tradeoff_clean(agg_rows, aggregate_dir / "tradeoff_clean.png")
     save_edge_plot([row for row in agg_rows if row["scenario"] == "hetero_channel"], aggregate_dir / "edge_share_comparison.png")
     save_delay_plot([row for row in agg_rows if row["scenario"] == "qos"], aggregate_dir / "delay_p95.png")
 

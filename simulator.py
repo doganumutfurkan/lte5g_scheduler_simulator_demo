@@ -28,7 +28,7 @@ class Scheduler:
             user_priority = 1 / (self.user_rates + 1e-6)
         return allocation
 
-def plot_allocation(allocation, title="Resource Allocation", save_path=None):
+def plot_allocation(allocation, title="Resource Allocation", save_path=None, show=True):
     plt.figure(figsize=(8, 4))
     plt.imshow(allocation, cmap='Blues', aspect='auto')
     plt.xlabel("Resource Blocks")
@@ -37,7 +37,10 @@ def plot_allocation(allocation, title="Resource Allocation", save_path=None):
     plt.colorbar(label="Allocated")
     if save_path:
         save_plot(save_path)
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 if __name__ == "__main__":
     scheduler = Scheduler(num_users=5, num_rb=20)
